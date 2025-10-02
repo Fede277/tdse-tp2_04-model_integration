@@ -1,0 +1,28 @@
+Análisis del WCET de la tarea Sensor — TP2-03
+
+Qué es
+El WCET (Worst-Case Execution Time) es el “máximo histórico” de cuánto tardó la tarea Sensor en un ciclo. No es un promedio: si en un ciclo tarda más que antes, el número sube; si tarda menos, el WCET no baja. Se guarda en task_dta_list[i].WCET.
+
+Qué cambió en TP2-03
+Ahora el proyecto tiene el System más completo (varios estados y señales al Actuator), pero el cálculo del WCET del **Sensor** sigue siendo local a esa tarea. O sea: medir el peor caso del Sensor no depende directamente de lo que haga System, salvo efectos colaterales (logs, más actividad de eventos, etc.). También seguimos con varios botones (pull-up), así que hay más chances de generar flancos para provocar el peor caso.
+
+Lo que observé
+
+* Tras un reset, el WCET arranca en 0 µs.
+* Con los primeros flancos confirmados (debounce), el valor sube y queda el máximo visto.
+* En mis mediciones quedó alrededor de **~14 µs** y se mantuvo ahí; solo aumentó cuando forcé más “ruido”/rebote.
+
+Por qué puede subir
+
+* Fases **FALLING/RISING**: mientras el tick de antirrebote se va decrementando, la tarea hace más pasos y tarda un poco más.
+* **LOGGER** adentro de la MEF: imprimir por UART mete costo y puede disparar un peor caso.
+* **Flancos con rebote** (UP↔DOWN) son lo que más pesa; dejar el botón estable casi no mueve la aguja.
+* Pausas del **debugger** distorsionan la medición; conviene observar con el programa corriendo.
+
+Entre botones
+Los botones están configurados parecido (pull-up + misma MEF), así que los WCETs terminan siendo similares. Si uno queda levemente más alto, probablemente tuvo más rebote justo cuando mediste.
+
+Conclusión
+El WCET del Sensor es un máximo que solo crece: empieza en 0, guarda el peor caso visto y queda ahí hasta que aparezca otro peor. Con el antirrebote activo, mi valor típico quedó en **~14 µs**; si habilito logs o hago pulsos rápidos (muchos flancos), puede subir un poco más.
+
+

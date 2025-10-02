@@ -1,0 +1,106 @@
+task_system.txt — (TP2-03-11)
+
+Qué es este módulo
+------------------
+Es la MEF del “System”. No toca hardware directo: recibe eventos “de sistema”
+(loop detector, botón manual, foto-celda IR, etc.) y a partir de eso “levanta”
+(señales) para que la tarea Actuator prenda/apague o haga blink en los LEDs.
+Corre de forma no bloqueante (update por tick).
+
+Archivos que miré
+-----------------
+- task_system.c  → implementación de la tarea y el switch(state).
+- task_system_attribute.h → enums de eventos/estados + la struct de datos.
+- task_system_interface.h → API de la cola de eventos del System.
+- task_system.png → el diagrama con los 7 estados (IDLE + ACTIVE_01…06).
+
+Tipos y estructuras (de task_system_attribute.h)
+------------------------------------------------
+• Eventos (task_system_ev_t):
+  EV_SYS_IDLE, EV_SYS_LOOP_DET, EV_SYS_NOT_LOOP_DET,
+  EV_SYS_MANUAL_BTN, EV_SYS_NOT_MANUAL_BTN,
+  EV_SYS_IR_PHO_CELL, EV_SYS_NOT_IR_PHO_CELL.
+  → Son los “inputs” de la MEF de System. Algunos vienen de otras tareas
+    (p.ej. Sensor) y otros son condiciones de contexto.
+
+• Estados (task_system_st_t):
+  ST_SYS_IDLE, ST_SYS_ACTIVE_01, …, ST_SYS_ACTIVE_06.
+  → Coinciden con los rectángulos del diagrama.
+
+• Datos del System (task_system_dta_t):
+  - tick (uint32_t): temporizador interno (se carga con un “máximo” y
+    se va descontando).
+  - state (estado actual).
+  - event (último evento leído).
+  - flag (bool): indica “hay evento pendiente” (viene de la cola).
+
+No hay array de dta (es un único sistema). En task_system.c se define:
+task_system_dta = { tick=0, state=IDLE, event=IDLE, flag=false }.
+
+Constantes y estilo no bloqueante (task_system.c)
+-------------------------------------------------
+- DEL_SYS_MIN = 0, DEL_SYS_MED = 50, DEL_SYS_MAX = 500 (µs “lógicos”).
+- g_task_system_tick_cnt: contador de “ticks” que llega por Systick.
+  En task_system_update() se consume de a uno y se ejecuta la MEF las veces
+  necesarias (while) para “ponerse al día”. Sin delays, sin loops bloqueantes.
+
+Interfaz con otras tareas (task_system_interface.h)
+---------------------------------------------------
+- init_queue_event_task_system(): inicializa la cola de eventos.
+- put_event_task_system(e): encola un evento para System.
+- get_event_task_system(): devuelve el próximo evento.
+- any_event_task_system(): dice si hay al menos uno.
+El System no lee GPIOs: se alimenta por eventos de esta cola. Para “ordenarle”
+algo al Actuator usa put_event_task_actuator(...) (definido en los headers
+del Actuator).
+
+Flujo de ejecución (lo que hace cada función)
+---------------------------------------------
+1) task_system_init():
+   - Resetea contadores (g_task_system_cnt).
+   - init_queue_event_task_system().
+   - Deja la MEF en ST_SYS_IDLE, event=EV_SYS_IDLE, flag=false.
+   - (Con LOGGER activo, imprime todo).
+
+2) task_system_update():
+   - Si hay ticks pendientes, incrementa g_task_system_cnt y llama a
+     task_system_statechart(). Repite mientras queden ticks.
+   - Esto asegura “update by time” sin bloquear.
+
+3) task_system_statechart():
+   - Si hay eventos en la cola: setea flag=true y copia event=get_event().
+   - switch(state) con 7 casos. Hoy el código está parcial:
+     • ST_SYS_IDLE:
+       - Si flag && event == EV_SYS_LOOP_DET → limpia flag, manda
+         EV_LED_XX_ON al Actuator (ID_LED_A) y pasa a ST_SYS_ACTIVE_01.
+     • ST_SYS_ACTIVE_01:
+       - Si flag && event == EV_SYS_IDLE → limpia flag, manda EV_LED_XX_OFF
+         y vuelve a ST_SYS_IDLE.
+     • ST_SYS_ACTIVE_02 … ST_SYS_ACTIVE_06:
+       - Están sin lógica (placeholders).
+     • default: reset defensivo (tick=0, state=IDLE, event=IDLE, flag=false).
+
+Relación con el diagrama (task_system.png)
+----------------------------------------------------------------
+El diagrama pide esto:
+- IDLE: acciones de entrada “raise EV_LED_01_OFF” y “EV_LED_02_OFF”.
+  Con EV_SYS_LOOP_DETECTOR → ST_SYS_ACTIVE_01.
+- ACTIVE_01:
+  Con EV_SYS_MANUAL_BUTTON → tick = DEL_SYS_MAX y “raise EV_LED_01_BLINK”
+  → ST_SYS_ACTIVE_02.
+- ACTIVE_02:
+  Si tick > 0 → tick-- y se queda.
+  Si tick == 0 → “raise EV_LED_01_ON” y “EV_LED_02_ON” → ST_SYS_ACTIVE_03.
+- ACTIVE_3:
+  Con EV_SYS_NOT_LOOP_DETECTOR → ST_SYS_ACTIVE_04.
+- ACTIVE_4:
+  Con EV_SYS_IR_PHOTO_CELL → ST_SYS_ACTIVE_05.
+- ACTIVE_5:
+  Con EV_SYS_NOT_IR_PHOTO_CELL → tick = DEL_SYS_MAX y “raise EV_LED_01_BLINK”
+  → ST_SYS_ACTIVE_06.
+- ACTIVE_6:
+  Si tick > 0 → tick-- y se queda.
+  Si tick == 0 → “raise EV_LED_01_OFF” y “EV_LED_02_OFF” → (el diagrama
+  vuelve hacia la rama izquierda).
+
+

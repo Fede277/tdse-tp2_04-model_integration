@@ -1,0 +1,32 @@
+Análisis de g_app_runtime_us (Application Runtime, µs) — TP2-03
+
+Qué es
+g_app_runtime_us es el tiempo total que tarda “la app” en cada iteración del lazo. Arranca en 0 al comienzo del ciclo y
+va acumulando lo que consumen las tareas (Sensor → System → Actuator). Al terminar el ciclo queda con el valor de ese ciclo; en el siguiente vuelve a 0.
+
+Qué cambió en TP2-03
+Ahora System tiene una MEF más “movida”: pasa por ACTIVE_01…ACTIVE_06, tiene estados temporizados (tick en ACTIVE_02 y ACTIVE_06) y
+dispara eventos al Actuator (LED ON/OFF/BLINK). Todo eso agrega un poco de trabajo en algunos ciclos (cuando hay eventos o cuando los ticks van bajando).
+
+Lo que observé
+
+* En reposo (sin accionar botones) el runtime típico siguió alrededor de 18–22 µs (en mi caso ~20 µs).
+* Cuando genero actividad (BTN_A/B/C/D) y el System entra a sus estados, el valor puede subir “un poquito” en los ciclos con eventos 
+  (por ejemplo, al entrar a ACTIVE_02/ACTIVE_06 y cuando manda BLINK/ON/OFF al Actuator). Igual se mantiene del mismo orden.
+* Cada ciclo vuelve a 0 y crece hasta el valor final de ese ciclo, como antes.
+
+Cuándo sube más
+
+* Ciclos con eventos encadenados: Sensor confirma flanco → System cambia de estado y manda señal → Actuator procesa. Ese encadenado se nota como un pequeño aumento.
+* Estados temporizados de System: mientras el tick va decrementando, hay una comparación y un “tick--” por ciclo (muy barato, pero suma algo).
+* LOGGER activo dentro de cualquier tarea: imprime por UART y el runtime se infla bastante.
+* Pausas de debugger/breakpoints: distorsionan la medición (mejor mirar con el programa corriendo).
+
+Relación con WCET
+El WCET por tarea es un “máximo histórico” (se actualiza solo si aparece algo peor). g_app_runtime_us es el total del ciclo actual.
+Por eso el WCET puede quedarse clavado en un número (p. ej., 14 µs en Sensor) mientras g_app_runtime_us va variando ciclo a ciclo según haya o no eventos.
+
+Conclusión
+Con el System completo del TP2-03, g_app_runtime_us sigue reflejando el “peso” de la app por iteración.
+En mi placa se mantiene cerca de ~20 µs en condiciones normales. En ciclos con muchos eventos (flancos + cambios de estado + señales al Actuator) sube
+un poco, y si activo logs sube mucho más. Si no hay actividad, queda bastante estable.

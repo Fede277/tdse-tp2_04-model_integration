@@ -158,7 +158,7 @@ static void task_system_statechart(void)
 {
     task_system_dta_t *p = &task_system_dta;
 
-    /* Levantar evento de la cola si hay */
+    /* Si hay un evento en la cola, lo levanto */
     if (true == any_event_task_system()) {
         p->flag  = true;
         p->event = get_event_task_system();
@@ -166,93 +166,76 @@ static void task_system_statechart(void)
 
     switch (p->state)
     {
-        case ST_SYS_IDLE:
-            /* IDLE --(EV_SYS_LOOP_DET)--> ACTIVE_01  + LED ON */
-            if (p->flag && (EV_SYS_LOOP_DET == p->event)) {
-                p->flag = false;
-                put_event_task_actuator(EV_LED_XX_ON, ID_LED_A);
-                p->state = ST_SYS_ACTIVE_01;
-            }
-            break;
+    case ST_SYS_IDLE:
+        if (p->flag && (EV_SYS_LOOP_DET == p->event)) {
+            p->flag = false;
+            // ANTES: put_event_task_actuator(EV_LED_XX_ON, ID_LED_A);
+            put_event_task_actuator(EV_LED_XX_BLINK, ID_LED_A);   // <-- pedir BLINK
+            p->state = ST_SYS_ACTIVE_01;
+        }
+        break;
 
-        case ST_SYS_ACTIVE_01:
-            /* Vuelta a IDLE (opcional) */
-            if (p->flag && (EV_SYS_IDLE == p->event)) {
-                p->flag = false;
-                put_event_task_actuator(EV_LED_XX_OFF, ID_LED_A);
-                p->state = ST_SYS_IDLE;
-                break;
-            }
-
-            /* ACTIVE_01 --(EV_SYS_MANUAL_BTN)--> ACTIVE_02
-               acciones: tick = DEL_SYS_MAX; LED BLINK */
-            if (p->flag && (EV_SYS_MANUAL_BTN == p->event)) {
-                p->flag = false;
-                p->tick = DEL_SYS_MAX;
-                put_event_task_actuator(EV_LED_XX_BLINK, ID_LED_A);
-                p->state = ST_SYS_ACTIVE_02;
-            }
-            break;
-
-        case ST_SYS_ACTIVE_02:
-            /* Estado temporizado:
-               - si tick > 0: tick--
-               - si tick == 0: LED ON y -> ACTIVE_03 */
-            if (p->tick > 0ul) {
-                p->tick--;
-            } else {
-                put_event_task_actuator(EV_LED_XX_ON, ID_LED_A);
-                /* (Si tu actuador maneja dos LEDs, acá podrías encender el otro también) */
-                p->state = ST_SYS_ACTIVE_03;
-            }
-            break;
-
-        case ST_SYS_ACTIVE_03:
-            /* ACTIVE_03 --(EV_SYS_NOT_LOOP_DET)--> ACTIVE_04 */
-            if (p->flag && (EV_SYS_NOT_LOOP_DET == p->event)) {
-                p->flag = false;
-                p->state = ST_SYS_ACTIVE_04;
-            }
-            break;
-
-        case ST_SYS_ACTIVE_04:
-            /* ACTIVE_04 --(EV_SYS_IR_PHO_CELL)--> ACTIVE_05 */
-            if (p->flag && (EV_SYS_IR_PHO_CELL == p->event)) {
-                p->flag = false;
-                p->state = ST_SYS_ACTIVE_05;
-            }
-            break;
-
-        case ST_SYS_ACTIVE_05:
-            /* ACTIVE_05 --(EV_SYS_NOT_IR_PHO_CELL)--> ACTIVE_06
-               acciones: tick = DEL_SYS_MAX; LED BLINK */
-            if (p->flag && (EV_SYS_NOT_IR_PHO_CELL == p->event)) {
-                p->flag = false;
-                p->tick = DEL_SYS_MAX;
-                put_event_task_actuator(EV_LED_XX_BLINK, ID_LED_A);
-                p->state = ST_SYS_ACTIVE_06;
-            }
-            break;
-
-        case ST_SYS_ACTIVE_06:
-            /* Estado temporizado:
-               - si tick > 0: tick--
-               - si tick == 0: LED OFF y -> IDLE */
-            if (p->tick > 0ul) {
-                p->tick--;
-            } else {
-                put_event_task_actuator(EV_LED_XX_OFF, ID_LED_A);
-                p->state = ST_SYS_IDLE;
-            }
-            break;
-
-        default:
-            /* Reset defensivo */
-            p->tick  = DEL_SYS_MIN;
+    case ST_SYS_ACTIVE_01:
+        if (p->flag && (EV_SYS_IDLE == p->event)) {
+            p->flag = false;
+            put_event_task_actuator(EV_LED_XX_OFF, ID_LED_A);     // <-- apagar al salir
             p->state = ST_SYS_IDLE;
-            p->event = EV_SYS_IDLE;
-            p->flag  = false;
-            break;
+        }
+        break;
+
+    case ST_SYS_ACTIVE_02:
+        /* Temporizado: cuando vence, LED ON y paso a ACTIVE_03 */
+        if (p->tick > 0ul) {
+            p->tick--;
+        } else {
+            put_event_task_actuator(EV_LED_XX_ON, ID_LED_A);
+            p->state = ST_SYS_ACTIVE_03;
+        }
+        break;
+
+    case ST_SYS_ACTIVE_03:
+        /* Sale por NOT_LOOP_DET */
+        if (p->flag && (EV_SYS_NOT_LOOP_DET == p->event)) {
+            p->flag = false;
+            p->state = ST_SYS_ACTIVE_04;
+        }
+        break;
+
+    case ST_SYS_ACTIVE_04:
+        /* Sale por IR_PHO_CELL */
+        if (p->flag && (EV_SYS_IR_PHO_CELL == p->event)) {
+            p->flag = false;
+            p->state = ST_SYS_ACTIVE_05;
+        }
+        break;
+
+    case ST_SYS_ACTIVE_05:
+        /* NOT_IR_PHO_CELL -> temporizado con blink */
+        if (p->flag && (EV_SYS_NOT_IR_PHO_CELL == p->event)) {
+            p->flag = false;
+            p->tick = DEL_SYS_MAX;
+            put_event_task_actuator(EV_LED_XX_BLINK, ID_LED_A);
+            p->state = ST_SYS_ACTIVE_06;
+        }
+        break;
+
+    case ST_SYS_ACTIVE_06:
+        /* Temporizado: cuando vence, LED OFF y vuelta a IDLE */
+        if (p->tick > 0ul) {
+            p->tick--;
+        } else {
+            put_event_task_actuator(EV_LED_XX_OFF, ID_LED_A);
+            p->state = ST_SYS_IDLE;
+        }
+        break;
+
+    default:
+        /* Reset defensivo */
+        p->tick  = DEL_SYS_MIN;
+        p->state = ST_SYS_IDLE;
+        p->event = EV_SYS_IDLE;
+        p->flag  = false;
+        break;
     }
 }
 
